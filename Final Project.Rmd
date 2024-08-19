@@ -1,0 +1,274 @@
+---
+title: "DSE6211 Preliminary Results"
+author: "Ryan Canfield"
+date: "2024-06-11"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+```{r}
+library(glmnet)         #For a Logistic Regression model.
+
+# Addressed comment and removed extra models
+library(MASS)
+library(e1071)          # For a Support Vector Machine model.
+library(neuralnet)      # For a basic Neural Network model.
+library(keras)          # For a TensorFlow Neural Network model.
+library(tensorflow)     # For a TensorFlow framework.
+library(reticulate)     # For a python interface.
+library(caret)          # For model training and evaluation.
+library(ROCR)           # For ROC analysis.
+library(tidyverse)      # For data manipulation.
+library(ggplot2)        # For data visualizations. 
+library(RColorBrewer)   # For coloring visuals.
+library(forcats)        # For Manipulating and working with categorical variables. 
+library(pROC)           # For Roc curves.
+library(yardstick)      # For Calibration curves.
+
+
+```
+
+```{r}
+# Reading the CSV file into a data frame
+df <- read.csv("project_data.csv")
+
+# Display a preview of the data frame.
+head(df)
+
+```
+
+```{r}
+# For the proposed supervised classification, we can define the level "cancelled" as the positive class and "not cancelled" as the negative class. Then, once we build a classification model (for example, using a neural network) to predict booking_status, we can use the predicted probability of positive class (i.e., "cancelled") membership as the risk cancellation score. This predicted probability is between 0 and 1. Defining these classes as the positive and negative classes, respectively, also provides the appropriate context for evaluating the predicted probabilities using ROC curves and AUC (which we will cover during an upcoming week).
+
+```
+
+```{r}
+### Preprocessing and addressing comments from Analytic Plan.
+
+# Checking for missing values.
+print(sum(is.na(df)))
+
+# Addresses comment.
+# Excluding Booking_ID since it is a unique identifier 
+# Assuming 'df' is your dataframe
+df <- df[, !(names(df) %in% "Booking_ID")]
+
+
+
+
+# Addresses comment.
+# Changes arrival date to season so when we use One Hot Encoding. 
+# It doesn't create hundreds of extra columns, dimensionality, and space.
+df$arrival_date <- as.Date(df[, "arrival_date"], format = "%m/%d/%Y")  
+df$season <- ifelse(month(df$arrival_date) %in% c(12, 1, 2), "Winter",
+                    ifelse(month(df$arrival_date) %in% c(3, 4, 5), "Spring",
+                           ifelse(month(df$arrival_date) %in% c(6, 7, 8), "Summer",
+                                  ifelse(month(df$arrival_date) %in% c(9, 10, 11), "Fall", NA))))
+df$arrival_date <- df$season
+df <- df[, -which(names(df) == "season")]
+
+# This changes our target variable to numerical values without emposing heiracrhy or an extra column.
+df$booking_status <- ifelse(df$booking_status == "not_canceled", 1, 0)
+
+```
+
+```{r}
+# Changed from label encoding to One Hot encoding
+for (col in names(df)) {  
+  if (!is.numeric(df[[col]])) {
+    # Perform one-hot encoding
+    df <- cbind(df, model.matrix(~df[[col]] - 1))
+    df <- df[, -which(names(df) == col)]
+    cat("One-hot encoding applied to column:", col, "\n")
+  }
+}
+
+```
+
+```{r}
+# Split the dataset into a training and testing set with an 80 - 20 split
+set.seed(123)
+ind <- createDataPartition(df$booking_status, p = 0.8, list = FALSE)
+train <- df[ind, ] 
+test <- df[-ind, ]
+
+# Scaling the data
+# Define indices of columns to be scaled
+columns_to_scale <- setdiff(seq_len(ncol(train)), 12)
+
+# Scale selected columns in the training set
+train[, columns_to_scale] <- lapply(train[, columns_to_scale], scale)
+
+# Scale selected columns in the test set
+test[, columns_to_scale] <- lapply(test[, columns_to_scale], scale)
+
+remove_prefix <- function(df) {
+  colnames(df) <- gsub("df\\[\\[col\\]\\]", "", colnames(df))
+  return(df)
+}
+
+train <- remove_prefix(train)
+test <- remove_prefix(test)
+
+# Convert training and test features to arrays
+training_features <- array(data = unlist(train[, -12]),
+                                 dim = c(nrow(train), 31))
+test_features <- array(data = unlist(test[, -12]),
+                             dim = c(nrow(test), 31))
+
+# Convert training and test labels to arrays
+training_labels <- array(data = unlist(train[, 12]),
+                               dim = c(nrow(train)))
+test_labels <- array(data = unlist(test[, 12]),
+                           dim = c(nrow(test)))
+
+```
+
+```{r}
+library(reticulate)
+library(tensorflow)
+library(keras)
+
+use_virtualenv("my_tf_workspace")
+
+```
+
+```{r}
+model <- keras_model_sequential(list(
+  layer_dense(units = 100, activation = "relu"),
+  layer_dense(units = 100, activation = "relu"),
+  layer_dense(units = 10, activation = "relu"),
+  layer_dense(units = 1, activation = "sigmoid")
+))
+
+```
+
+```{r}
+compile(model,
+        optimizer = "rmsprop",
+        loss = "binary_crossentropy",
+        metrics = "accuracy")
+
+```
+
+```{r}
+NN <- fit(model, training_features, training_labels,
+               epochs = 100, batch_size = 512, validation_split = 0.33)
+
+plot(NN)
+
+```
+
+```{r}
+predictions4 <- predict(model, test_features)
+head(predictions4, 10)
+
+```
+
+```{r}
+predicted_class4 <- (predictions4[, 1] >= 0.5) * 1
+head(predicted_class4, 10)
+
+conf_matrix4 <- confusionMatrix(as.factor(predicted_class4), as.factor(test_labels))
+conf_matrix4
+
+```
+
+```{r}
+# Perform PCA on the training features
+pca_model <- prcomp(training_features, center = TRUE, scale. = TRUE)
+
+# Transform the training features
+training_features_pca <- predict(pca_model, training_features)
+test_features_pca <- predict(pca_model, test_features)
+
+# keeping components that explain 95% of the variance
+explained_variance <- summary(pca_model)$importance[2,]
+num_components <- which(cumsum(explained_variance) >= 0.95)[1]
+
+# Subset the transformed features to keep only the required number of components
+training_features_pca <- training_features_pca[, 1:num_components]
+test_features_pca <- test_features_pca[, 1:num_components]
+
+# Convert the matrices to arrays
+training_features_array <- array(training_features_pca, dim = c(nrow(training_features_pca), num_components))
+test_features_array <- array(test_features_pca, dim = c(nrow(test_features_pca), num_components))
+
+# Print the summary of the PCA model to understand the variance explained by each principal component
+summary(pca_model)
+
+# Print the number of components chosen
+print(num_components)
+
+```
+
+```{r}
+model2 <- keras_model_sequential(list(
+  layer_dense(units = 100, activation = 'relu'),
+  layer_dropout(rate = 0.2),
+  layer_dense(units = 100, activation = 'relu'),
+  layer_dropout(rate = 0.2),
+  layer_dense(units = 10, activation = 'relu'),
+  layer_dropout(rate = 0.2),
+  layer_dense(units = 1, activation = 'sigmoid')))
+
+compile(model2,
+        optimizer = "rmsprop",
+        loss = "binary_crossentropy",
+        metrics = "accuracy")
+
+# Define early stopping callback
+early_stopping <- callback_early_stopping(
+  monitor = "val_loss",  
+  patience = 10,         
+  restore_best_weights = TRUE 
+)
+
+
+
+NN_pca <- fit(model2, training_features_pca, training_labels,
+               epochs = 100, batch_size = 512, validation_split = 0.33, callbacks = list(early_stopping)
+)
+
+plot(NN_pca)
+
+```
+
+```{r}
+predictions5 <- predict(model2, test_features_pca)
+head(predictions5, 10)
+
+```
+
+```{r}
+predicted_class5 <- (predictions5[, 1] >= 0.5) * 1
+head(predicted_class5, 10)
+
+conf_matrix5 <- confusionMatrix(as.factor(predicted_class5), as.factor(test_labels))
+conf_matrix5
+```
+
+```{r}
+# Predict probabilities for both models on test data
+pred_model <- model %>% predict(training_features)
+pred_model2 <- model2 %>% predict(training_features_pca)
+
+pred_model <- as.vector(pred_model)
+pred_model2 <- as.vector(pred_model2)
+
+
+# Calculate ROC curves and AUC
+roc_model <- roc(training_labels, pred_model)
+roc_model2 <- roc(training_labels, pred_model2)
+
+# Plot ROC curves
+plot(roc_model, col = "blue", lwd = 2, main = "ROC Curves")
+plot(roc_model2, col = "red", lwd = 2, add = TRUE, lty = 2)
+legend("bottomright", legend = c("Model 1", "Model 2"), col = c("blue", "red"), lty = 1:2, cex = 0.8)
+
+```
+

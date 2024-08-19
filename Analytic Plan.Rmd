@@ -1,0 +1,89 @@
+---
+title: "Analytic Plan"
+author: "Ryan Canfield"
+date: "2024-05-20"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+```{r}
+library(glmnet) #For a Logistic Regression model.
+library(randomForest) #For a basic Random model.
+library(ranger) # For an alternative Random Forest model.
+library(xgboost) # For a Extreme Gradient Boosting model.
+library(e1071) # For a Support Vector Machine model.
+library(neuralnet) #For a basic Neural Network model.
+library(keras) #For a TensorFlow Neural Network model.
+library(tensorflow) #For a TensorFlow framework.
+library(reticulate) #For a python interface.
+library(caret) # For model training and evaluation.
+library(ROCR) # For ROC analysis.
+library(tidyverse) #For data manipulation.
+library(ggplot2) #For data visualizations. 
+library(RColorBrewer) #For coloring visuals.
+```
+
+```{r}
+# Reading the CSV file into a data frame
+df <- read.csv("..\\Dataset\\project_data.csv")
+
+# Display a preview of the data frame.
+head(df)
+
+```
+
+```{r}
+# Get summary statistics of the data frame
+summary(df)
+
+```
+```{r}
+# Check for missing values in a data frame df
+missing_values <- is.na(df)
+num_missing <- sum(missing_values)
+num_missing
+
+```
+```{r}
+library(forcats)
+
+# Loop through each column of the dataframe
+for (col in names(df)[-c(1, which(sapply(df, class) == "arrival_date"))]) {  # Exclude the first column, and Date columns
+  # Check if the column is non-numeric
+  if (!is.numeric(df[[col]])) {
+    # Perform label encoding
+    df[[col]] <- as.integer(factor(df[[col]]))
+    
+    # Print a message indicating label encoding
+    cat("Label encoding applied to column:", col, "\n")
+  }
+}
+
+```
+
+
+```{r}
+# Looking at different histograms to get a better idea of the data
+par(mfrow = c(2,3))
+hist(df$booking_status, xlab = "Booking Status", main = "Booking Status Distribution")
+hist(df$avg_price_per_room, col = 4, breaks = 20, xlab = "Room Price", main = "Average Price Distribution")
+hist(df$room_type_reserved, col = 3, xlab = "Room Type", main = "Room Type Distribution")
+hist(df$type_of_meal_plan, col = 2, breaks = 10, xlab = "Meal Plan #", main = "Meal Plan Distrbution")
+hist(df$no_of_weekend_nights, col = 5, xlab = "Weekend Nights", main = "Weekend Nights Distrbution")
+hist(df$no_of_week_nights , col = 6, breaks = 8, xlab = "Week Nights", main = "Week Nights Distrbution")
+```
+```{r}
+# Looking at different histograms to get a better idea of the data
+par(mfrow = c(2,3))
+hist(df$no_of_adults, col = 12, breaks = 4, xlab = "# of Adults", main = "Adult Distribution")
+hist(df$no_of_children, col = 7, breaks = 15, xlab = "# of Children ", main = "Children Distribution")
+hist(df$required_car_parking_space, col = 8,  breaks = 4, xlab = "No or Yes", main = "Do They Need a Parking Space?")
+hist(df$lead_time, col = 9, breaks = 10, xlab = "Lead Time", main = "Distrbution of Lead Time")
+hist(df$repeated_guest, col = 10, breaks = 4, xlab = "No or Yes", main = "Are They a Repeated Guest?")
+hist(df$no_of_previous_cancellations, col = 11, breaks = 4, xlab = "No or Yes", main = "Have They Canceled Before?")
+```
+
